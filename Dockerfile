@@ -21,5 +21,10 @@ COPY package*.json ./
 
 EXPOSE 3000
 
-# Jalankan migrate deploy sebelum start agar skema selalu sinkron.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+# Migrasi TIDAK dijalankan otomatis di sini: DATABASE_URL di cloud memakai
+# PgBouncer (transaction mode, mis. Supabase pooler port 6543) dan
+# `prisma migrate deploy` butuh koneksi langsung (advisory lock) — jalan
+# via pooler bisa gagal dan bikin container crash-loop. Jalankan migrasi
+# manual dari mesin lokal memakai connection string DIRECT (port 5432):
+#   DATABASE_URL="<direct-url>" npx prisma migrate deploy
+CMD ["node", "dist/main"]
