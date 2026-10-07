@@ -1,0 +1,894 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// ISP Platform — Prisma schema (PostgreSQL 16 + PostGIS)
+// ═══════════════════════════════════════════════════════════════════════════
+// POSTGIS SETUP
+// ────────────
+// 1. Buat database, lalu jalankan SEKALI sebelum/sesudah migrate pertama:
+//      CREATE EXTENSION IF NOT EXISTS postgis;
+// 2. Kolom geometry dideklarasikan sebagai Unsupported(...) sehingga Prisma
+//    Client mengabaikannya pada query (tidak bisa dibaca/ditulis via Prisma).
+//    Buat kolomnya secara manual — lihat prisma/migrations/POSTGIS_NOTES.md
+//    untuk pernyataan ALTER TABLE yang siap salin-tempel.
+// 3. Baca/tulis geometry lewat $queryRaw, contoh:
+//      await prisma.$queryRaw`
+//        UPDATE "Customer" SET geom = ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)
+//        WHERE id = ${id}`;
+// ───────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum RoleName {
+  ADMIN
+  NOC
+  CASHIER
+  TECHNICIAN
+  CS
+  RESELLER
+}
+
+enum CustomerStatus {
+  CANDIDATE
+  TRIAL
+  ACTIVE
+  ISOLATED
+  SUSPENDED
+  TERMINATED
+}
+
+enum CustomerType {
+  RETAIL
+  CORPORATE
+  RESELLER
+}
+
+enum ServiceType {
+  PPPOE
+  STATIC_IP
+  DHCP
+  HOTSPOT
+}
+
+enum BillingType {
+  PREPAID
+  POSTPAID
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  UNPAID
+  PARTIAL
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  VIRTUAL_ACCOUNT
+  QRIS
+  EWALLET
+  RETAIL
+  CASH
+  GATEWAY
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum OltVendor {
+  HUAWEI
+  ZTE
+  FIBERHOME
+  HSGQ
+  CDATA
+  HIOSO
+}
+
+enum NodeStatus {
+  ACTIVE
+  MAINTENANCE
+  DOWN
+}
+
+enum OdpPortStatus {
+  FREE
+  USED
+  RESERVED
+  DAMAGED
+}
+
+enum OnuStatus {
+  ONLINE
+  OFFLINE
+  LOS
+  UNCONFIGURED
+  DEGRADED
+}
+
+enum TicketStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum WorkOrderType {
+  INSTALL
+  RELOCATE
+  UPGRADE
+  MAINTENANCE
+}
+
+enum WorkOrderStatus {
+  DRAFT
+  ASSIGNED
+  ON_SITE
+  DONE
+  VERIFIED
+  CANCELLED
+}
+
+enum CableType {
+  FEEDER
+  DISTRIBUTION
+  DROP
+}
+
+enum CoreStatus {
+  FREE
+  IN_USE
+  DAMAGED
+  RESERVED
+}
+
+enum NotificationChannel {
+  WHATSAPP
+  TELEGRAM
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum NasType {
+  MIKROTIK
+}
+
+enum InventoryCategory {
+  ROUTER
+  ONU
+  FIBER
+  SPLITTER
+  OTHER
+}
+
+enum InventoryStatus {
+  IN_STOCK
+  ASSIGNED
+  DEFECTIVE
+}
+
+enum IpPoolType {
+  PRIVATE
+  PUBLIC
+  CGNAT
+}
+
+enum IpAllocationStatus {
+  FREE
+  ALLOCATED
+  RESERVED
+}
+
+enum VlanPurpose {
+  INTERNET
+  IPTV
+  VOIP
+  MGMT
+}
+
+enum SplitterLevel {
+  PRIMARY
+  SECONDARY
+}
+
+enum CommissionStatus {
+  PENDING
+  PAID
+}
+
+// ── CORE: USERS & RBAC ─────────────────────────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         RoleName
+  resellerId   Int?
+  reseller     User?    @relation("ResellerAgents", fields: [resellerId], references: [id])
+  agents       User[]   @relation("ResellerAgents")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  confirmedPayments Payment[]           @relation("PaymentConfirmer")
+  reportedTickets   Ticket[]            @relation("TicketReporter")
+  assignedTickets   Ticket[]            @relation("TicketAssignee")
+  workOrders        WorkOrder[]         @relation("TechnicianWorkOrders")
+  serviceLogs       ServiceLog[]
+  auditLogs         AuditLog[]
+  commissions       ResellerCommission[]
+
+  @@index([role])
+  @@index([resellerId])
+  @@index([isActive])
+}
+
+// ── CORE: CUSTOMERS ────────────────────────────────────────────────────────
+
+model Customer {
+  id           Int            @id @default(autoincrement())
+  customerNo   String         @unique
+  name         String
+  phone        String         @unique
+  email        String?
+  ktpNumber    String?
+  address      String
+  village      String?
+  district     String?
+  city         String?
+  latitude     Float?
+  longitude    Float?
+  geom         Unsupported("geometry(Point,4326)")?
+  status       CustomerStatus @default(CANDIDATE)
+  type         CustomerType   @default(RETAIL)
+  notes        String?        @db.Text
+  packageId    Int?
+  package      Package?       @relation(fields: [packageId], references: [id])
+  nasRouterId  Int?
+  nasRouter    NasRouter?     @relation(fields: [nasRouterId], references: [id])
+  onuId        Int?           @unique
+  onu          Onu?           @relation("CustomerOnu", fields: [onuId], references: [id])
+  odpPortId    Int?           @unique
+  odpPort      OdpPort?       @relation("CustomerOdpPort", fields: [odpPortId], references: [id])
+  serviceType  ServiceType    @default(PPPOE)
+  billingType  BillingType    @default(PREPAID)
+  dueDay       Int            @default(10)
+  graceDays    Int            @default(3)
+  balance      Decimal        @default(0) @db.Decimal(14, 2)
+  installDate  DateTime?
+  activeDate   DateTime?
+  terminatedAt DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  // Sisi balik dari FK yang dipegang Onu / OdpPort
+  assignedOnu     Onu?     @relation("OnuAssignedCustomer")
+  assignedOdpPort OdpPort? @relation("OdpPortAssignedCustomer")
+
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  payments      Payment[]
+  tickets       Ticket[]
+  serviceLogs   ServiceLog[]
+  auditLogs     AuditLog[]
+  ipAllocation  IpAllocation?
+  staticLease   StaticLease?
+  workOrders    WorkOrder[]
+
+  @@index([status])
+  @@index([type])
+  @@index([packageId])
+  @@index([nasRouterId])
+  @@index([name])
+  @@index([city])
+  @@index([createdAt])
+}
+
+model ServiceLog {
+  id          Int      @id @default(autoincrement())
+  customerId  Int
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  action      String
+  oldValue    Json?
+  newValue    Json?
+  createdById Int
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ── CORE: PACKAGES & SUBSCRIPTIONS ─────────────────────────────────────────
+
+model Package {
+  id              Int         @id @default(autoincrement())
+  name            String      @unique
+  downloadMbps    Int
+  uploadMbps      Int
+  price           Decimal     @db.Decimal(14, 2)
+  validityDays    Int         @default(30)
+  fupGb           Int?
+  serviceType     ServiceType
+  billingType     BillingType
+  installFee      Decimal     @default(0) @db.Decimal(14, 2)
+  setupFee        Decimal     @default(0) @db.Decimal(14, 2)
+  description     String?     @db.Text
+  isActive        Boolean     @default(true)
+  mikrotikProfile String?
+  radiusRateLimit String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  customers     Customer[]
+  subscriptions Subscription[]
+
+  @@index([isActive])
+  @@index([serviceType])
+}
+
+model Subscription {
+  id            Int                @id @default(autoincrement())
+  customerId    Int
+  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  packageId     Int
+  package       Package            @relation(fields: [packageId], references: [id])
+  startDate     DateTime
+  endDate       DateTime?
+  status        SubscriptionStatus @default(ACTIVE)
+  autoRenew     Boolean            @default(true)
+  priceOverride Decimal?           @db.Decimal(14, 2)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  invoices Invoice[]
+
+  @@index([customerId])
+  @@index([packageId])
+  @@index([status])
+}
+
+// ── CORE: BILLING ──────────────────────────────────────────────────────────
+
+model Invoice {
+  id             Int           @id @default(autoincrement())
+  number         String        @unique
+  customerId     Int
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscriptionId Int?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  periodStart    DateTime      @db.Date
+  periodEnd      DateTime      @db.Date
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime
+  subtotal       Decimal       @db.Decimal(14, 2)
+  discount       Decimal       @default(0) @db.Decimal(14, 2)
+  ppn            Decimal       @default(0) @db.Decimal(14, 2)
+  adminFee       Decimal       @default(0) @db.Decimal(14, 2)
+  penalty        Decimal       @default(0) @db.Decimal(14, 2)
+  total          Decimal       @db.Decimal(14, 2)
+  amountPaid     Decimal       @default(0) @db.Decimal(14, 2)
+  status         InvoiceStatus @default(DRAFT)
+  notes          String?       @db.Text
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  payments    Payment[]
+  commissions ResellerCommission[]
+
+  @@unique([customerId, periodStart, periodEnd])
+  @@index([status])
+  @@index([dueDate])
+  @@index([customerId])
+  @@index([number])
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  invoiceId     Int?
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id])
+  customerId    Int
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  method        PaymentMethod
+  channel       String
+  amount        Decimal       @db.Decimal(14, 2)
+  reference     String        @unique
+  proofUrl      String?
+  status        PaymentStatus @default(PENDING)
+  paidAt        DateTime?
+  confirmedById Int?
+  confirmedBy   User?         @relation("PaymentConfirmer", fields: [confirmedById], references: [id])
+  rawWebhook    Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([reference])
+  @@index([paidAt])
+}
+
+model ResellerCommission {
+  id         Int              @id @default(autoincrement())
+  resellerId Int
+  reseller   User             @relation(fields: [resellerId], references: [id])
+  invoiceId  Int
+  invoice    Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount     Decimal          @db.Decimal(14, 2)
+  percent    Decimal          @db.Decimal(5, 2)
+  status     CommissionStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@index([resellerId])
+  @@index([status])
+}
+
+model Voucher {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  discountPercent Decimal? @db.Decimal(5, 2)
+  discountAmount  Decimal? @db.Decimal(14, 2)
+  maxUses         Int      @default(1)
+  usedCount       Int      @default(0)
+  validFrom       DateTime
+  validTo         DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([validTo])
+}
+
+// ── NETWORK: NAS / ROUTER ──────────────────────────────────────────────────
+
+model NasRouter {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  host            String
+  apiPort         Int      @default(8728)
+  username        String
+  passwordEncrypted String
+  useTls          Boolean  @default(false)
+  type            NasType  @default(MIKROTIK)
+  location        String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customers    Customer[]
+  ipPools      IpPool[]
+  staticLeases StaticLease[]
+
+  @@index([isActive])
+}
+
+// ── NETWORK: FTTH HIERARCHY (OLT → PON → ODC → ODP → ONT) ───────────────────
+
+model Olt {
+  id                  Int        @id @default(autoincrement())
+  name                String     @unique
+  vendor              OltVendor
+  model               String
+  mgmtIp              String     @unique
+  snmpCommunity       String     @default("public")
+  snmpVersion         Int        @default(2)
+  sshUsername         String?
+  sshPasswordEncrypted String?
+  popLocation         String?
+  latitude            Float?
+  longitude           Float?
+  geom                Unsupported("geometry(Point,4326)")?
+  slotCount           Int        @default(2)
+  ponPerSlot          Int        @default(16)
+  uplinkInfo          String?
+  status              NodeStatus @default(ACTIVE)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  ponPorts PonPort[]
+  onus     Onu[]
+  vlans    Vlan[]
+
+  @@index([vendor])
+  @@index([status])
+}
+
+model PonPort {
+  id      Int        @id @default(autoincrement())
+  oltId   Int
+  olt     Olt        @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  slotNo  Int
+  ponNo   Int
+  name    String
+  status  NodeStatus @default(ACTIVE)
+
+  odcs Odc[]
+  odps Odp[]
+  onus Onu[]
+
+  @@unique([oltId, slotNo, ponNo])
+  @@index([oltId])
+  @@index([status])
+}
+
+model Odc {
+  id        Int        @id @default(autoincrement())
+  code      String     @unique
+  name      String
+  ponPortId Int?
+  ponPort   PonPort?   @relation(fields: [ponPortId], references: [id])
+  latitude  Float?
+  longitude Float?
+  geom      Unsupported("geometry(Point,4326)")?
+  capacity  Int        @default(144)
+  status    NodeStatus @default(ACTIVE)
+  photoUrl  String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  odps      Odp[]
+  splitters Splitter[]
+
+  @@index([ponPortId])
+  @@index([status])
+}
+
+model Odp {
+  id        Int        @id @default(autoincrement())
+  code      String     @unique
+  name      String
+  odcId     Int?
+  odc       Odc?       @relation(fields: [odcId], references: [id])
+  ponPortId Int?
+  ponPort   PonPort?   @relation(fields: [ponPortId], references: [id])
+  latitude  Float?
+  longitude Float?
+  geom      Unsupported("geometry(Point,4326)")?
+  capacity  Int        @default(8)
+  usedPorts Int        @default(0)
+  status    NodeStatus @default(ACTIVE)
+  photoUrl  String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  ports     OdpPort[]
+  splitters Splitter[]
+
+  @@index([odcId])
+  @@index([ponPortId])
+  @@index([status])
+}
+
+model OdpPort {
+  id         Int           @id @default(autoincrement())
+  odpId      Int
+  odp        Odp           @relation(fields: [odpId], references: [id], onDelete: Cascade)
+  portNo     Int
+  status     OdpPortStatus @default(FREE)
+  customerId Int?          @unique
+  customer   Customer?     @relation("OdpPortAssignedCustomer", fields: [customerId], references: [id])
+
+  // Sisi balik relasi Customer.odpPortId
+  customerRef Customer? @relation("CustomerOdpPort")
+
+  @@unique([odpId, portNo])
+  @@index([odpId])
+  @@index([status])
+}
+
+model Onu {
+  id          Int        @id @default(autoincrement())
+  sn          String     @unique
+  mac         String?    @unique
+  model       String
+  vendor      String
+  firmware    String?
+  oltId       Int?
+  olt         Olt?       @relation(fields: [oltId], references: [id])
+  ponPortId   Int?
+  ponPort     PonPort?   @relation(fields: [ponPortId], references: [id])
+  ontId       String?
+  rxPower     Float?
+  txPower     Float?
+  status      OnuStatus  @default(UNCONFIGURED)
+  lastSeen    DateTime?
+  customerId  Int?       @unique
+  customer    Customer?  @relation("OnuAssignedCustomer", fields: [customerId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Sisi balik relasi Customer.onuId
+  customerRef Customer? @relation("CustomerOnu")
+
+  @@index([oltId])
+  @@index([ponPortId])
+  @@index([status])
+  @@index([lastSeen])
+}
+
+model Splitter {
+  id     Int           @id @default(autoincrement())
+  odpId  Int?
+  odp    Odp?          @relation(fields: [odpId], references: [id])
+  odcId  Int?
+  odc    Odc?          @relation(fields: [odcId], references: [id])
+  ratio  String
+  level  SplitterLevel
+
+  @@index([odpId])
+  @@index([odcId])
+}
+
+model FiberCable {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique
+  name      String
+  cableType CableType
+  coreCount Int
+  lengthM   Float?
+  routeGeom Unsupported("geometry(LineString,4326)")?
+  fromNode  String
+  toNode    String
+  status    CoreStatus @default(FREE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([cableType])
+  @@index([status])
+}
+
+// ── NETWORK: IPAM & VLAN ───────────────────────────────────────────────────
+
+model IpPool {
+  id           Int       @id @default(autoincrement())
+  name         String    @unique
+  cidr         String
+  gateway      String?
+  dnsPrimary   String?
+  dnsSecondary String?
+  poolType     IpPoolType
+  nasRouterId  Int?
+  nasRouter    NasRouter? @relation(fields: [nasRouterId], references: [id])
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  allocations IpAllocation[]
+
+  @@index([nasRouterId])
+  @@index([isActive])
+}
+
+model IpAllocation {
+  id         Int                @id @default(autoincrement())
+  poolId     Int
+  pool       IpPool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  ipAddress  String
+  customerId Int?               @unique
+  customer   Customer?          @relation(fields: [customerId], references: [id])
+  status     IpAllocationStatus @default(FREE)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@unique([poolId, ipAddress])
+  @@index([poolId])
+  @@index([status])
+}
+
+model Vlan {
+  id      Int         @id @default(autoincrement())
+  vlanId  Int
+  name    String
+  purpose VlanPurpose
+  oltId   Int?
+  olt     Olt?        @relation(fields: [oltId], references: [id])
+
+  @@unique([oltId, vlanId])
+  @@index([oltId])
+  @@index([purpose])
+}
+
+model StaticLease {
+  id          Int       @id @default(autoincrement())
+  customerId  Int       @unique
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  macAddress  String
+  ipAddress   String    @unique
+  nasRouterId Int
+  nasRouter   NasRouter @relation(fields: [nasRouterId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([nasRouterId])
+}
+
+// ── NETWORK: FreeRADIUS SCHEMA ─────────────────────────────────────────────
+
+model RadCheck {
+  id        Int    @id @default(autoincrement())
+  username  String
+  attribute String @default("Cleartext-Password")
+  op        String @default(":=")
+  value     String
+
+  @@unique([username, attribute])
+  @@index([username])
+}
+
+model RadReply {
+  id        Int    @id @default(autoincrement())
+  username  String
+  attribute String
+  op        String @default("=")
+  value     String
+
+  @@index([username])
+  @@index([attribute])
+}
+
+model RadAcct {
+  id               Int       @id @default(autoincrement())
+  acctSessionId    String    @unique
+  username         String
+  nasIpAddress     String
+  framedIpAddress  String?
+  acctStartTime    DateTime?
+  acctStopTime     DateTime?
+  acctSessionTime  Int?
+  acctInputOctets  BigInt?
+  acctOutputOctets BigInt?
+
+  @@index([username])
+  @@index([acctStartTime])
+}
+
+// ── OPS: TICKETS, WORK ORDERS, INVENTORY ────────────────────────────────────
+
+model Ticket {
+  id           Int            @id @default(autoincrement())
+  number       String         @unique
+  customerId   Int?
+  customer     Customer?      @relation(fields: [customerId], references: [id])
+  title        String
+  description  String         @db.Text
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+  reportedById Int
+  reportedBy   User           @relation("TicketReporter", fields: [reportedById], references: [id])
+  assignedToId Int?
+  assignedTo   User?          @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([status])
+  @@index([priority])
+  @@index([customerId])
+  @@index([assignedToId])
+}
+
+model WorkOrder {
+  id           Int             @id @default(autoincrement())
+  number       String          @unique
+  type         WorkOrderType
+  customerId   Int
+  customer     Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  technicianId Int?
+  technician   User?           @relation("TechnicianWorkOrders", fields: [technicianId], references: [id])
+  status       WorkOrderStatus @default(DRAFT)
+  scheduledAt  DateTime?
+  checklist    Json?
+  photos       Json?
+  gpsLat       Float?
+  gpsLng       Float?
+  notes        String?         @db.Text
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([status])
+  @@index([type])
+  @@index([customerId])
+  @@index([technicianId])
+}
+
+model InventoryItem {
+  id           Int               @id @default(autoincrement())
+  sku          String
+  name         String
+  category     InventoryCategory
+  serialNumber String?           @unique
+  macAddress   String?
+  quantity     Int               @default(1)
+  warehouse    String            @default("Gudang Utama")
+  status       InventoryStatus   @default(IN_STOCK)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([category])
+  @@index([status])
+  @@index([sku])
+}
+
+// ── OPS: NOTIFICATIONS & AUDIT ─────────────────────────────────────────────
+
+model NotificationLog {
+  id        Int                @id @default(autoincrement())
+  channel   NotificationChannel
+  recipient String
+  template  String
+  payload   Json
+  status    NotificationStatus @default(QUEUED)
+  sentAt    DateTime?
+  error     String?            @db.Text
+  createdAt DateTime           @default(now())
+
+  @@index([status])
+  @@index([channel])
+  @@index([template])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         Int       @id @default(autoincrement())
+  actorId    Int?
+  actor      User?     @relation(fields: [actorId], references: [id])
+  action     String
+  entity     String
+  entityId   String
+  diff       Json?
+  ipAddress  String?
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  createdAt  DateTime  @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model Setting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String   @db.Text
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

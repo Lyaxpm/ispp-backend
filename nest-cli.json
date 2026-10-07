@@ -1,0 +1,1 @@
+{"$schema":"https://json.schemastore.org/nest-cli","collection":"@nestjs/schematics","compilerOptions":{"assets":[],"deleteOutDir":true,"watchAssets":false},"sourceRoot":"src"}

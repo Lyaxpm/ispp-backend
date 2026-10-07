@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: isp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: isp
+      POSTGRES_PASSWORD: isp_secret
+      POSTGRES_DB: isp_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U isp -d isp_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: isp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: isp-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://isp:isp_secret@postgres:5432/isp_platform?schema=public"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  freeradius:
+    image: freeradius/freeradius-server:latest
+    container_name: isp-freeradius
+    restart: unless-stopped
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+      - "3799:3799/udp" # CoA / Disconnect-Request
+    volumes:
+      - ./freeradius:/etc/raddb:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # ── FreeRADIUS ↔ PostgreSQL ─────────────────────────────────────────
+    # 1. Buat folder ./freeradius dan salin konfigurasi default raddb ke sana.
+    # 2. Aktifkan modul sql di mods-enabled/sql, sesuaikan:
+    #      driver = "rlm_sql_postgresql"
+    #      server = "postgres", login = "isp", password = "isp_secret"
+    #      radius_db = "isp_platform"
+    #    Tabel radcheck / radreply / radacct sudah disediakan oleh Prisma —
+    #    skema default FreeRADIUS (schema.sql) kompatibel: kolom username,
+    #    attribute, op, value, serta acctsessionid dsb. untuk radacct.
+    # 3. Di sites-enabled/default: uncomment "sql" pada blok authorize,
+    #    accounting, dan session agar auth memakai database ini.
+    # 4. CoA (untuk kick session saat isolir): pastikan di mods-enabled
+    #    home_server/coa dikonfigurasi dengan secret NAS yang sama dengan
+    #    field NasRouter (disimpan terenkripsi di passwordEncrypted).
+
+  # ── GenieACS (TR-069) — aktifkan bila butuh provisioning ONU via ACS ──
+  # genieacs:
+  #   image: genieacs/genieacs:latest
+  #   container_name: isp-genieacs
+  #   restart: unless-stopped
+  #   environment:
+  #     GENIEACS_MONGODB_CONNECTION_URL: "mongodb://mongo:27017/genieacs"
+  #     GENIEACS_REDIS_HOST: "redis"
+  #   ports:
+  #     - "7557:7557" # NBI API (dipakai backend via GENIEACS_URL)
+  #     - "7547:7547" # CWMP
+  #     - "3000:3000" # UI
+  #   depends_on:
+  #     - redis
+  # mongo:
+  #   image: mongo:6
+  #   volumes:
+  #     - mongodata:/data/db
+
+volumes:
+  pgdata:
+  redisdata:
+  # mongodata:
