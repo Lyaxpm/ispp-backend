@@ -1,5 +1,8 @@
 # ── Build stage ─────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# Debian slim (bukan alpine): Prisma membutuhkan deteksi OpenSSL 3 yang
+# andal saat runtime — di alpine/musl deteksinya gagal dan client default
+# ke engine openssl-1.1.x yang tidak ada lib-nya (crash libssl.so.1.1).
+FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
@@ -10,7 +13,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # ── Runtime stage ─────────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
 

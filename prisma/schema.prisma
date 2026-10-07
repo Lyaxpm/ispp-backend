@@ -17,11 +17,11 @@
 
 generator client {
   provider = "prisma-client-js"
-  // Runtime Docker memakai node:20-alpine (musl + OpenSSL 3.x), sehingga
-  // engine linux-musl-openssl-3.0.x harus ikut diunduh saat generate --
-  // kalau tidak, Prisma default ke openssl-1.1.x dan crash dengan
-  // "Error loading shared library libssl.so.1.1".
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  // "native" cukup: build & runtime sama-sama Debian (node:20-slim,
+  // OpenSSL 3.x) sehingga engine debian-openssl-3.0.x terdeteksi otomatis.
+  // Jangan pakai alpine/musl — deteksi versi OpenSSL Prisma gagal di sana
+  // dan client default ke engine openssl-1.1.x yang crash (libssl.so.1.1).
+  binaryTargets = ["native"]
 }
 
 datasource db {
