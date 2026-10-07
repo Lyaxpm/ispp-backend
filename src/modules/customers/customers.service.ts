@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CustomerStatus, OnuStatus, Prisma } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { buildMeta, paginate } from '../../common/utils/pagination.util';
 import { NetworkOrchestratorService } from '../../network/services/network-orchestrator.service';
@@ -305,5 +306,61 @@ export class CustomersService {
       select: { id: true },
     });
     if (!exists) throw new NotFoundException('Pelanggan tidak ditemukan');
+  }
+
+  /** Status akun portal pelanggan (untuk badge di UI). */
+  async getPortalAccount(id: number) {
+    await this.ensureExists(id);
+    const acc = await this.prisma.customerAccount.findUnique({
+      where: { customerId: id },
+      select: { email: true, isActive: true, lastLoginAt: true },
+    });
+    return acc ? { hasAccount: true, ...acc } : { hasAccount: false as const };
+  }
+
+  /** Buatkan akun login portal untuk pelanggan (satu akun per pelanggan). */
+  async createPortalAccount(id: number, email: string, password: string) {
+    await this.ensureExists(id);
+    const existing = await this.prisma.customerAccount.findUnique({
+      where: { customerId: id },
+    });
+    if (existing) {
+      throw new BadRequestException('Pelanggan ini sudah memiliki akun portal');
+    }
+    const emailTaken = await this.prisma.customerAccount.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+    if (emailTaken) {
+      throw new BadRequestException('Email sudah dipakai akun portal lain');
+    }
+    if (!password || password.length < 8) {
+      throw new BadRequestException('Kata sandi minimal 8 karakter');
+    }
+    const acc = await this.prisma.customerAccount.create({
+      data: {
+        customerId: id,
+        email: email.toLowerCase().trim(),
+        passwordHash: await bcrypt.hash(password, 10),
+      },
+      select: { email: true, isActive: true },
+    });
+    return { hasAccount: true, ...acc };
+  }
+
+  /** Reset kata sandi akun portal pelanggan. */
+  async resetPortalPassword(id: number, newPassword: string) {
+    await this.ensureExists(id);
+    const acc = await this.prisma.customerAccount.findUnique({
+      where: { customerId: id },
+    });
+    if (!acc) throw new NotFoundException('Pelanggan belum memiliki akun portal');
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException('Kata sandi minimal 8 karakter');
+    }
+    await this.prisma.customerAccount.update({
+      where: { customerId: id },
+      data: { passwordHash: await bcrypt.hash(newPassword, 10) },
+    });
+    return { ok: true, message: 'Kata sandi akun portal direset' };
   }
 }

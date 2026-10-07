@@ -84,6 +84,32 @@ export class DriverFactory implements OnModuleDestroy {
   /*  OLT drivers                                                      */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Bangun driver router mentah dari kredensial yang sudah didekripsi,
+   * TANPA caching — dipakai untuk uji koneksi satu-kali (mis. endpoint
+   * POST /nas-routers/:id/test-connection). Caller bertanggung jawab
+   * memanggil connect()/disconnect().
+   */
+  buildRouterDriver(params: {
+    host: string;
+    apiPort: number;
+    username: string;
+    password: string;
+    useTls: boolean;
+    type: NasType;
+  }): RouterDriver {
+    if (params.type !== NasType.MIKROTIK) {
+      throw new NotFoundException(`Tipe NAS "${params.type}" belum didukung oleh network driver`);
+    }
+    return new MikrotikDriver({
+      host: params.host,
+      port: params.apiPort,
+      username: params.username,
+      password: params.password,
+      useTls: params.useTls,
+    });
+  }
+
   async getOltDriver(oltId: number): Promise<OltDriver> {
     const key = `olt:${oltId}`;
     const cached = this.drivers.get(key);

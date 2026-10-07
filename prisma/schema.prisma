@@ -312,6 +312,7 @@ model Customer {
   ipAllocation  IpAllocation?
   staticLease   StaticLease?
   workOrders    WorkOrder[]
+  account       CustomerAccount?
 
   @@index([status])
   @@index([type])
@@ -320,6 +321,20 @@ model Customer {
   @@index([name])
   @@index([city])
   @@index([createdAt])
+}
+
+// ── PORTAL PELANGGAN: akun login mandiri per customer ────────────────────────
+
+model CustomerAccount {
+  id           Int       @id @default(autoincrement())
+  customerId   Int       @unique
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  email        String    @unique
+  passwordHash String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model ServiceLog {

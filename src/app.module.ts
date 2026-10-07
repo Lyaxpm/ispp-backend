@@ -19,6 +19,10 @@ import { IpamModule } from './modules/ipam/ipam.module';
 import { Tr069Module } from './modules/tr069/tr069.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { PackagesModule } from './modules/packages/packages.module';
+import { NasModule } from './modules/nas/nas.module';
+import { UsersModule } from './modules/users/users.module';
+import { CustomerAuthModule } from './modules/customer-auth/customer-auth.module';
+import { PortalModule } from './modules/portal/portal.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -53,6 +57,10 @@ import { registerAllQueues } from './workers/queues';
     Tr069Module, // GenieACS adapter
     CustomersModule, // Pelanggan + aksi NOC
     PackagesModule, // Katalog paket
+    NasModule, // CRUD NAS router + uji koneksi
+    UsersModule, // Manajemen akun staf
+    CustomerAuthModule, // Login akun pelanggan (portal)
+    PortalModule, // Portal pelanggan: profil, tagihan, tiket
     DashboardModule, // Statistik & grafik pendapatan
     TicketsModule, // Tiket insiden
     InventoryModule, // Stok gudang

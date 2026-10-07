@@ -9,6 +9,7 @@
  *  - 3 paket layanan
  *  - Settings billing (PPN_RATE, GRACE_PERIOD_DAYS, dst.)
  *  - 1 NasRouter (MikroTik) + 1 OLT + 1 PON port + 1 ODP + 8 port ODP
+ *  - 1 akun demo portal pelanggan (pelanggan@contoh.id / pelanggan123)
  *
  * Syarat: CREDENTIALS_KEY harus di-set di environment sebelum menjalankan
  * seed ini, karena password router/OLT disimpan terenkripsi (AES-256-GCM).
@@ -204,6 +205,45 @@ async function main(): Promise<void> {
     });
   }
   console.log(`✔ olt id=${olt.id}, pon id=${pon.id}, odp id=${odp.id} (+8 port)`);
+
+  // ── Akun demo portal pelanggan ─────────────────────────────────────────
+  // Idempoten: dilewati bila akun sudah ada. Butuh minimal 1 customer —
+  // bila belum ada, buat customer demo dulu agar portal bisa langsung dicoba.
+  try {
+    let demoCustomer = await prisma.customer.findFirst({ orderBy: { id: 'asc' } });
+    if (!demoCustomer) {
+      demoCustomer = await prisma.customer.create({
+        data: {
+          customerNo: 'DEMO-0001',
+          name: 'Pelanggan Demo',
+          phone: '081200000001',
+          address: 'Jl. Contoh No. 1, Jakarta',
+          status: 'ACTIVE',
+        },
+      });
+      console.log(`✔ customer demo id=${demoCustomer.id} dibuat`);
+    }
+    const existingAccount = await prisma.customerAccount.findUnique({
+      where: { email: 'pelanggan@contoh.id' },
+    });
+    if (!existingAccount) {
+      await prisma.customerAccount.create({
+        data: {
+          customerId: demoCustomer.id,
+          email: 'pelanggan@contoh.id',
+          passwordHash: await bcrypt.hash('pelanggan123', 10),
+        },
+      });
+      console.log('✔ akun portal demo: pelanggan@contoh.id / pelanggan123');
+    } else {
+      console.log('✔ akun portal demo sudah ada — dilewati');
+    }
+  } catch (err) {
+    console.warn(
+      '⚠ seed akun portal dilewati:',
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   console.log('\nSeed selesai. Login admin: admin@isp.local / admin123');
 }
