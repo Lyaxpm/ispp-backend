@@ -34,7 +34,7 @@ function toNumber(raw: string | undefined, fallback: number): number {
 export default registerAs(
   'app',
   (): AppConfig => ({
-    port: toNumber(process.env.APP_PORT, 3000),
+    port: toNumber(process.env.PORT ?? process.env.APP_PORT, 3000),
     corsOrigins: (process.env.CORS_ORIGIN ?? 'http://localhost:3001')
       .split(',')
       .map((o) => o.trim())

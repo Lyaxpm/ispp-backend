@@ -72,7 +72,7 @@ async function bootstrap(): Promise<void> {
   // ── Graceful shutdown ─────────────────────────────────────────────────
   app.enableShutdownHooks();
 
-  const port = config.get<number>('APP_PORT', 3000);
+  const port = config.get<number>('app.port', 3000);
   await app.listen(port, '0.0.0.0');
   logger.log(`Backend berjalan di http://0.0.0.0:${port}/api — docs: /api/docs`);
 }
