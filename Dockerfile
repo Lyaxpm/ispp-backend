@@ -5,6 +5,11 @@
 FROM node:20-slim AS builder
 WORKDIR /app
 
+# openssl CLI juga di builder: agar `prisma generate` me-resolve "native"
+# ke debian-openssl-3.0.x (bukan 1.1.x) dan mengunduh engine yang benar.
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm ci
 

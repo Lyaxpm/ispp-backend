@@ -17,11 +17,12 @@
 
 generator client {
   provider = "prisma-client-js"
-  // "native" cukup: build & runtime sama-sama Debian (node:20-slim,
-  // OpenSSL 3.x) sehingga engine debian-openssl-3.0.x terdeteksi otomatis.
-  // Jangan pakai alpine/musl — deteksi versi OpenSSL Prisma gagal di sana
-  // dan client default ke engine openssl-1.1.x yang crash (libssl.so.1.1).
-  binaryTargets = ["native"]
+  // "native" + "debian-openssl-3.0.x" eksplisit: builder & runtime sama-sama
+  // Debian (node:20-slim, OpenSSL 3.x). Tanpa target eksplisit, generate di
+  // builder (tanpa openssl CLI) me-resolve "native" ke debian-openssl-1.1.x
+  // dan engine 3.0.x tidak terunduh → runtime crash "could not locate the
+  // Query Engine for runtime debian-openssl-3.0.x".
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
