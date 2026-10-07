@@ -17,6 +17,12 @@ FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
 
+# openssl CLI WAJIB ada: Prisma mendeteksi versi OpenSSL sistem dengan
+# menjalankan perintah `openssl`. Tanpa ini, deteksi gagal → client
+# default ke engine openssl-1.1.x → crash "libssl.so.1.1: No such file".
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
